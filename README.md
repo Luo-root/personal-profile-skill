@@ -1,8 +1,20 @@
-# personal-profile-skill
+<p align="center">
+  <img src="assets/logo.svg" width="104" height="104" alt="personal-profile-skill">
+</p>
 
-一份能被 Agent 读懂、能跟着你走的**个人画像**。换 Agent、换电脑、换工具，不用再从零解释你是谁。
+<h1 align="center">personal-profile-skill</h1>
 
-当前版本 **0.2.0**。
+<p align="center">
+  一份能被 Agent 读懂、能跟着你走的<strong>个人画像</strong>。<br>
+  换 Agent、换电脑、换工具，不用再从零解释你是谁。
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.1.0-4f46e5" alt="version">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="license">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555" alt="platform">
+  <img src="https://img.shields.io/badge/format-Agent%20Skill-0ea5e9" alt="format">
+</p>
 
 ## 它解决什么
 
@@ -99,6 +111,10 @@ python scripts/validate.py
 
 换新版时只覆盖左列，右列别动。`profile/_index.md` 是派生物，可以删，下次跑校验会自动重建。
 
+## 许可证
+
+MIT。拿去改、拿去用，保留版权声明即可。
+
 ## 目录
 
 | 路径 | 作用 |
@@ -109,6 +125,8 @@ python scripts/validate.py
 | `profile/` | 画像真相源 |
 | `profile/_index.md` | 索引（脚本生成） |
 | `modules/` | 可选能力包，默认不用装 |
+| `assets/logo.svg` | 项目图标 |
+| `LICENSE` | MIT |
 | `inbox.md` | 待合并 / 已拒绝 |
 | `scripts/profile_write.py` | 唯一写入通道 |
 | `scripts/validate.py` | 自检 + 基线比对 + 刷新索引 |
