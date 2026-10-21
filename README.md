@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.0-4f46e5" alt="version">
+  <img src="https://img.shields.io/badge/version-0.4.0-4f46e5" alt="version">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="license">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555" alt="platform">
   <img src="https://img.shields.io/badge/format-Agent%20Skill-0ea5e9" alt="format">
@@ -36,38 +36,39 @@ skill 会被 Agent 读进上下文，而上下文会发到模型供应商。换 
 
 凭据本身放在 Bitwarden、系统钥匙串、`gh` 的 keyring 里。画像只记接线图——那份接线图叫 `profile/restore-my-access.md`，是整套东西里最有用的一份。
 
-## 模板和你的数据是分开的
+## 两个地方，画像和模板各归各位
 
-这个 skill 有两个根，互不牵连：
-
-**引擎根**（技能本体，公开的仓库就是它）：
+**① 公开模板仓库**（GitHub 上这个，以及你本地的源码副本）
 
 ```
 SKILL.md  onboarding.md  scripts/  templates/  modules/  assets/
 ```
 
-**数据根**（你的画像，只在本机）：
+这里**只有模板，一行个人数据都没有**。你可以随便改、随便推。
+
+**② 你本机装的 skill**（Agent 真正读画像的地方）
 
 ```
-profile/                  画像真相源
-inbox.md                  待合并 / 已拒绝
-resident-layer.md         常驻层摘要
-.profile-state.json       哈希基线
+<skills>/personal-profile-skill/
+  SKILL.md  scripts/  templates/  modules/      ← 跟仓库一样，是模板
+  profile/                  ← 你的画像在这里
+  inbox.md
+  resident-layer.md
+  .profile-state.json
 ```
 
-两个根之间靠引擎根里的一个本机文件 `.profile-root` 挂钩，内容就是数据根的绝对路径：
+**画像住在 skill 目录里，但它是 untracked 的**——`git pull` 更新模板时，git 不会碰它。
+所以：公开仓库干净，画像却一直跟着 skill 走。
+
+**③ 源码副本里不放画像。** 你本地那份仓库副本（改代码用）里放一个 `.profile-root` 文件，
+内容就一个词 `none`：
 
 ```
-D:\Github-Project\personal-profile-data
+none
 ```
 
-**这样设计的后果，正是你要的**：
-
-- 公开仓库里只有模板，一行个人数据都没有；
-- 你的画像连**本机的 skill 仓库**都不在里面——它在一个独立的目录里；
-- **技能结构怎么重构都不影响画像的位置**，因为路径记在指针文件里，不记在代码里。
-
-想换台机器，拷数据根那一个目录就行。
+这是给工具看的声明：**「这里不含画像」**。脚本认得它——在这个目录跑自检只查技能本体，
+不会默默铺一份空画像出来；想在这儿写画像会被直接拒绝，并告诉你该去哪操作。
 
 ## 四步跑起来
 
@@ -75,7 +76,7 @@ D:\Github-Project\personal-profile-data
 2. **让 Agent 采集**：对新 Agent 说「读 `SKILL.md` 和 `onboarding.md`，帮我建个人画像」。阶段 1 只问 5 个问题，**每阶段问完就落盘**，中途停下也不丢。
 3. **装进你的 Agent**：
    - **magpie**：Library → 技能 → 新增 → 来源选**本机文件夹**，指向这个目录。不用另外建仓库。
-   - **MiniMax Code**：`git clone` 到 `~/.minimax/skills/personal-profile-skill/`，再写一行 `.profile-root` 指到数据根。
+   - **MiniMax Code**：`git clone` 到 `~/.minimax/skills/personal-profile-skill/`。
    - 别的宿主按各自的 skill 安装方式装，**装好后确认它指向的是这个目录**，不是某份拷贝。
 4. **贴常驻层**：把生成的 `resident-layer.md` 粘进宿主的常驻位——magpie 的「指令」，
    MiniMax Code 的 `AGENTS.md` 或用户级 Memory。
@@ -86,20 +87,18 @@ D:\Github-Project\personal-profile-data
 
 ```powershell
 git clone https://github.com/Luo-root/personal-profile-skill.git "$env:USERPROFILE\.minimax\skills\personal-profile-skill"
-Set-Content "$env:USERPROFILE\.minimax\skills\personal-profile-skill\.profile-root" "D:\Github-Project\personal-profile-data"
 ```
 
 macOS / Linux：
 
 ```sh
 git clone https://github.com/Luo-root/personal-profile-skill.git ~/.minimax/skills/personal-profile-skill
-echo "/path/to/your/data-root" > ~/.minimax/skills/personal-profile-skill/.profile-root
 ```
 
-装完验证一下——它应该打印出你的数据根：
+装完跑一次验证——它应该报出画像有几份启用：
 
 ```sh
-python ~/.minimax/skills/personal-profile-skill/scripts/validate.py --index-only
+python ~/.minimax/skills/personal-profile-skill/scripts/validate.py
 ```
 
 ## 怎么加载
@@ -111,9 +110,8 @@ Agent 不会一次读全量：
 3. 能回答当前问题就停手
 
 索引由脚本生成，不手写，所以不会漂。索引不存在或过期时跑
-`python scripts/validate.py --index-only` 重建——**只重建索引，不做全量体检**，
-输出会告诉你数据根在哪。机器上没有 Python 也能读：读 `.profile-root` 找到数据根，
-再列 `profile/` 下的文件，看每份的小节有没有正文。
+`python scripts/validate.py --index-only` 重建——**只重建索引，不做全量体检**。
+机器上没有 Python 也能读：列 `profile/` 下的文件，看每份的小节有没有正文。
 
 
 ## 之后怎么维护
@@ -182,15 +180,22 @@ python scripts/validate.py --audit         # 比基线，查有没有绕过脚�
 python .selftest/selftest.py
 ```
 
-## 升级模板
+## 改模板 / 升级模板
 
-模板没有内置升级机制，但模板和你的数据本来就分在两个根：
+日常只有两件事，各在各的地方做：
 
-| 引擎根（可整体替换） | 数据根（绝对别动） |
-| --- | --- |
-| `SKILL.md`、`onboarding.md`、`modules/`、`scripts/`、`templates/` | `profile/`、`inbox.md`、`resident-layer.md`、`.profile-state.json` |
+| 想干什么 | 在哪做 | 做完之后 |
+| --- | --- | --- |
+| 改 skill 本体（SKILL.md、scripts、templates） | 源码副本 | 提交 → 推送 → 到安装实例 `git pull` |
+| 改自己的画像 | 安装实例（或用脚本写） | 画像是 untracked，pull 不会碰它 |
 
-换新版时只换左列，右列根本不在同一个目录里，碰不到。
+**`git pull` 更新模板时，画像是安全的**——它不在 git 跟踪范围里，git 不会碰 untracked 文件。
+就算哪次升级真的动了画像的目录结构，也只会让脚本找不到（然后明确报错），
+不会**静默改坏**你已有的内容。
+
+模板定型之后建议**少动结构**：要改就增量加，别重排目录、别改小节名——
+画像里的小节名（`## 称呼` 这类）是数据的锚点，改了就得迁移。
+
 `profile/_index.md` 是派生物，可以删，下次跑 `--index-only` 会自动重建。
 
 ## 许可证
@@ -199,7 +204,7 @@ MIT。拿去改、拿去用，保留版权声明即可。
 
 ## 目录
 
-| 路径 | 作用 | 在仓库里？ |
+| 路径 | 作用 | 在公开仓库里？ |
 | --- | --- | --- |
 | `SKILL.md` | 加载规则 + 写入协议 | 是 |
 | `onboarding.md` | 首次采集脚本 | 是 |
@@ -210,12 +215,12 @@ MIT。拿去改、拿去用，保留版权声明即可。
 | `LICENSE` | MIT | 是 |
 | `scripts/profile_write.py` | 唯一写入通道 | 是 |
 | `scripts/validate.py` | 自检 + 基线比对 + 刷新索引 | 是 |
-| `scripts/profile_lib.py` | 文件发现、空判定、索引生成、模板初始化、双根解析（共用） | 是 |
+| `scripts/profile_lib.py` | 文件发现、空判定、索引生成、模板初始化、数据根解析（共用） | 是 |
 | `scripts/scan_rules.py` | 密钥特征（共用） | 是 |
-| `.selftest/selftest.py` | 自测套件（两种布局各跑一遍全链路） | 是 |
-| `.profile-root` | 本机文件：指向数据根的绝对路径 | 否（gitignore） |
-| **数据根** `profile/` | **你的**画像真相源 | 否（在仓库外） |
-| **数据根** `profile/_index.md` | 索引（脚本生成） | 否 |
-| **数据根** `resident-layer.md` | **你的**常驻层（生成物，带版本号） | 否 |
-| **数据根** `inbox.md` | **你的**待合并 / 已拒绝 | 否 |
-| **数据根** `.profile-state.json` | 哈希基线（脚本自动维护） | 否 |
+| `.selftest/selftest.py` | 自测套件（三种模式各跑一遍全链路） | 是 |
+| `.profile-root` | 本机文件：写 `none` = 本副本不含画像 | 否（gitignore） |
+| `profile/` | **你的**画像真相源（住在 skill 安装实例里） | 否 |
+| `profile/_index.md` | 索引（脚本生成） | 否 |
+| `resident-layer.md` | **你的**常驻层（生成物，带版本号） | 否 |
+| `inbox.md` | **你的**待合并 / 已拒绝 | 否 |
+| `.profile-state.json` | 哈希基线（脚本自动维护） | 否 |

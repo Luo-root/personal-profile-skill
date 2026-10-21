@@ -197,6 +197,39 @@ def run_suite(layout: str) -> None:
         shutil.rmtree(data, ignore_errors=True)
 
 
+def check_template_mode() -> None:
+    """模板工作区：公开仓库的源码副本，声明「这里不含画像」。
+
+    这是整个设计里最容易搞错的一格——工具层面必须认得出它，
+    免得在公开仓库的副本里默默铺出一份空画像、让人以为画像在那儿。
+    """
+    print(f"\n{'=' * 60}\n模式：模板工作区（不含画像）\n{'=' * 60}")
+
+    engine = make_engine("template")
+    (engine / ".profile-root").write_text("none\n", encoding="utf-8")
+
+    result = run(engine, "validate.py")
+    check("[template] 自检退出码 0", result.returncode == 0, f"实际 {result.returncode}")
+    check("[template] 明确说明这里不含画像", "模板工作区" in result.stdout, result.stdout[:150])
+    check("[template] 没有长出空壳 profile/", not (engine / "profile").exists())
+    check("[template] 没有生成 resident-layer.md", not (engine / "resident-layer.md").exists())
+
+    result = run(engine, "profile_write.py", "propose", "--file", "who-i-am",
+                 "--section", "称呼", "--text", "t", "--why", "w")
+    check("[template] 写入被拒绝", result.returncode != 0, f"实际 {result.returncode}")
+    check("[template] 拒绝时说清了去哪操作",
+          "安装实例" in (result.stdout + result.stderr), (result.stdout + result.stderr)[:200])
+
+    # --root 可以临时把它当普通目录用
+    data = make_data("template")
+    result = run(engine, "validate.py", "--root", str(data), "--index-only")
+    check("[template] --root 能临时指定别处", result.returncode == 0 and str(data) in result.stdout,
+          f"实际 {result.returncode}")
+
+    shutil.rmtree(engine, ignore_errors=True)
+    shutil.rmtree(data, ignore_errors=True)
+
+
 def check_repo_hygiene() -> None:
     """仓库层面的检查：模板没被误屏蔽、个人数据确实被挡住。"""
     print(f"\n{'=' * 60}\n仓库卫生\n{'=' * 60}")
@@ -231,6 +264,7 @@ def check_repo_hygiene() -> None:
 def main() -> int:
     run_suite("single")
     run_suite("split")
+    check_template_mode()
     check_repo_hygiene()
 
     print()

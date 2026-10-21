@@ -393,6 +393,12 @@ def main() -> int:
     # 引擎根 = 脚本的上一级；数据根 = --root > .profile-root 指针 > 引擎根
     skill_root = Path(__file__).resolve().parent.parent
     data_root = resolve_data_root(skill_root, args.root)
+    if data_root is None:
+        raise SystemExit(
+            "x 这个工作区不含画像——它是模板工作区（公开仓库的源码副本）。\n"
+            "  画像住在 skill 安装实例里，请到那边操作；\n"
+            "  或用 --root <画像所在目录> 指过去。"
+        )
     if not data_root.is_dir():
         raise SystemExit(f"x 数据根不是一个目录：{data_root}")
 

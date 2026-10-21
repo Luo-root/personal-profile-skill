@@ -248,6 +248,10 @@ def main() -> int:
     if not skill_root.is_dir():
         print(f"[x] 引擎根不是一个目录：{skill_root}")
         return EXIT_CANNOT
+
+    if data_root is None:
+        return _check_engine_only(skill_root, args)
+
     if not data_root.is_dir():
         print(f"[x] 数据根不是一个目录：{data_root}")
         return EXIT_CANNOT
@@ -375,6 +379,49 @@ def main() -> int:
     print("结果：通过。")
     if empty:
         print(f"有 {len(empty)} 份画像是空的，跳过即可；需要时再补。")
+    return EXIT_OK
+
+
+def _check_engine_only(skill_root: Path, args) -> int:
+    """模板工作区自检：这里不含画像，只查技能本体。
+
+    公开仓库的源码副本就是这种——画像住在 skill 安装实例里，不在这边。
+    """
+    files = list(iter_markdown([skill_root]))
+    print(f"引擎根 {skill_root}")
+    print("本工作区是模板工作区，不含画像——画像在 skill 安装实例里。")
+    print(f"共 {len(files)} 个 Markdown 文件\n")
+
+    hard, soft = scan_secrets(files)
+    broken = scan_links(files)
+
+    if hard:
+        print("[x] 发现密钥或敏感标识，必须删掉再提交：")
+        for rel_path, lineno, label, masked in hard:
+            print(f"    {rel_path}:{lineno}  {label}  {masked}")
+    else:
+        print("[ok] 没发现密钥或敏感标识")
+
+    if soft:
+        print("\n[!] 这些地方像是密钥赋值，请人眼确认（不一定是错）：")
+        for rel_path, lineno, label, masked in soft:
+            print(f"    {rel_path}:{lineno}  {label}  {masked}")
+
+    if broken:
+        print("\n[!] 相对链接指向不存在的文件：")
+        for rel_path, target in broken:
+            print(f"    {rel_path} -> {target}")
+    else:
+        print("[ok] 没有断掉的相对链接")
+
+    print(f"\n技能版本：{skill_version(skill_root)}")
+    print()
+    if hard:
+        print("结果：失败。先删掉上面的密钥，再重新跑一次。")
+        return EXIT_FAIL
+    print("结果：通过。")
+    if args.audit:
+        print("（--audit 在模板工作区没有可审的内容——画像不在这里。）")
     return EXIT_OK
 
 

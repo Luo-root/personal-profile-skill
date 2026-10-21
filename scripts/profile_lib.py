@@ -36,6 +36,8 @@ TEMPLATE_DIR = "templates/profile"
 TEMPLATE_RESIDENT = "templates/resident-layer.md"
 # 数据根指针文件：相对引擎根，内容是数据根的绝对路径。本机文件，不进仓库。
 DATA_POINTER = ".profile-root"
+# 指针文件里的特殊值：声明「本工作区不含画像」（公开仓库的源码副本就是这种）
+NO_PROFILE = "none"
 
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
@@ -104,13 +106,20 @@ def strip_comments(text: str) -> str:
 # ---------------------------------------------------------------- 两个根
 
 
-def resolve_data_root(skill_root: Path, override: str | None = None) -> Path:
+def resolve_data_root(skill_root: Path, override: str | None = None) -> Path | None:
     """找到数据根：命令行 > `.profile-root` 指针 > 引擎根本身。
 
-    指针文件读不到、路径不存在、或者指的地方是空的，都退回引擎根——
-    单目录布局（画像和技能放一起）继续照旧能跑。
+    返回 None 表示「本工作区明确不含画像」——那是模板工作区（公开仓库的源码副本），
+    画像住在 skill 安装实例里。两边不要混。
+
+    指针文件的内容：
+      - 一行绝对路径 → 画像在那个目录
+      - `none`         → 本工作区不含画像
+      - 空 / 路径不存在 → 退回引擎根本身（单目录布局：画像就在旁边）
     """
     if override:
+        if override.strip().lower() == NO_PROFILE:
+            return None
         return Path(override).expanduser().resolve()
     pointer = skill_root / DATA_POINTER
     if pointer.is_file():
@@ -118,6 +127,8 @@ def resolve_data_root(skill_root: Path, override: str | None = None) -> Path:
             text = pointer.read_text(encoding="utf-8", errors="replace").strip()
         except OSError:
             text = ""
+        if text.lower() == NO_PROFILE:
+            return None
         if text:
             candidate = Path(text).expanduser()
             if candidate.is_dir():
@@ -176,11 +187,14 @@ def ensure_profile_file(skill_root: Path, data_root: Path, stem: str) -> bool:
     return True
 
 
-def bootstrap_workspace(skill_root: Path, data_root: Path) -> tuple[list[str], bool]:
+def bootstrap_workspace(skill_root: Path, data_root: Path | None) -> tuple[list[str], bool]:
     """把工作区补齐：画像空壳 + 常驻层模板。
 
+    data_root 为 None 表示「本工作区不含画像」——什么都不做。
     返回 (新建的画像文件名, 常驻层是否新建)。
     """
+    if data_root is None:
+        return [], False
     created = bootstrap_profile(skill_root, data_root)
     resident = False
     source = skill_root / TEMPLATE_RESIDENT
