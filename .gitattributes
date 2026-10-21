@@ -1,0 +1,6 @@
+# 统一用 LF：这个 skill 会跨 Windows / macOS / Linux 使用，
+# 行尾随平台变化会让 diff 噪音很大，也不利于脚本执行。
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.zip binary
