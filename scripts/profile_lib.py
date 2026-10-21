@@ -5,8 +5,18 @@
 为什么要生成索引：Agent 判断「哪份填了、要不要展开」，不该去读六份文件才知道。
 索引由脚本生成、不手写——手写的索引一定会漂。
 
-为什么要分模板和数据：`templates/` 里是空壳，`profile/` 里是你的画像。
-公开仓库只留空壳，画像留在本机——这样仓库可以公开，画像不会跟着走。
+为什么要分两个根：
+  **引擎根**（skill_root）——技能本体：SKILL.md、scripts/、templates/、modules/。
+    可以公开、可以随便重装、可以随时重构。
+  **数据根**（data_root）——你的画像：profile/、inbox.md、resident-layer.md、哈希基线。
+    跟技能结构无关，路径不变就不会被结构变更牵连。
+
+数据根怎么找（优先级从高到低）：
+  1. 命令行 `--root`
+  2. 引擎根里的 `.profile-root` 指针文件（内容是数据根的绝对路径）
+  3. 引擎根本身（单目录布局：画像和技能放一起的老用法，照旧能跑）
+
+这样技能结构怎么改都不影响画像的位置，而画像也不进任何公开仓库。
 """
 
 from __future__ import annotations
@@ -21,9 +31,11 @@ PROFILE_DIR = "profile"
 INDEX_NAME = "_index.md"
 RESIDENT = "resident-layer.md"
 SKILL_DOC = "SKILL.md"
-# 空壳模板所在目录：仓库里只有它，profile/ 是本机数据目录
+# 空壳模板所在目录：相对引擎根
 TEMPLATE_DIR = "templates/profile"
 TEMPLATE_RESIDENT = "templates/resident-layer.md"
+# 数据根指针文件：相对引擎根，内容是数据根的绝对路径。本机文件，不进仓库。
+DATA_POINTER = ".profile-root"
 
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
@@ -89,18 +101,53 @@ def strip_comments(text: str) -> str:
     return COMMENT_RE.sub("", text)
 
 
+# ---------------------------------------------------------------- 两个根
+
+
+def resolve_data_root(skill_root: Path, override: str | None = None) -> Path:
+    """找到数据根：命令行 > `.profile-root` 指针 > 引擎根本身。
+
+    指针文件读不到、路径不存在、或者指的地方是空的，都退回引擎根——
+    单目录布局（画像和技能放一起）继续照旧能跑。
+    """
+    if override:
+        return Path(override).expanduser().resolve()
+    pointer = skill_root / DATA_POINTER
+    if pointer.is_file():
+        try:
+            text = pointer.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            text = ""
+        if text:
+            candidate = Path(text).expanduser()
+            if candidate.is_dir():
+                return candidate.resolve()
+    return skill_root
+
+
+def data_pointer_path(skill_root: Path) -> Path:
+    return skill_root / DATA_POINTER
+
+
+def write_data_pointer(skill_root: Path, data_root: Path) -> Path:
+    """写指针文件：告诉这个技能实例「画像在哪儿」。"""
+    pointer = data_pointer_path(skill_root)
+    write_atomic(pointer, str(data_root.resolve()) + "\n")
+    return pointer
+
+
 # ---------------------------------------------------------------- 模板初始化
 
 
-def bootstrap_profile(root: Path) -> list[str]:
-    """新工作区初始化：把 `templates/profile/` 里的空壳复制到 `profile/`。
+def bootstrap_profile(skill_root: Path, data_root: Path) -> list[str]:
+    """新工作区初始化：把引擎根 `templates/profile/` 的空壳复制到数据根 `profile/`。
 
     只在「全新」时做——`profile/` 不存在，或里面一份画像都没有。
     已有画像不动，也不复活用户主动删掉的那些。
     返回新建的文件名。
     """
-    source = root / TEMPLATE_DIR
-    target = root / PROFILE_DIR
+    source = skill_root / TEMPLATE_DIR
+    target = data_root / PROFILE_DIR
     if not source.is_dir():
         return []
     if target.is_dir() and any(target.glob("*.md")):
@@ -115,13 +162,13 @@ def bootstrap_profile(root: Path) -> list[str]:
     return created
 
 
-def ensure_profile_file(root: Path, stem: str) -> bool:
-    """补一份指定画像：`profile/<stem>.md` 不存在时，从模板复制一份过来。
+def ensure_profile_file(skill_root: Path, data_root: Path, stem: str) -> bool:
+    """补一份指定画像：数据根 `profile/<stem>.md` 不存在时，从引擎根的模板复制一份。
 
     模板里也没有就别造——让调用方提示用户自己建带 `##` 小节的文件。
     """
-    source = root / TEMPLATE_DIR / f"{stem}.md"
-    dest = root / PROFILE_DIR / f"{stem}.md"
+    source = skill_root / TEMPLATE_DIR / f"{stem}.md"
+    dest = data_root / PROFILE_DIR / f"{stem}.md"
     if dest.exists() or not source.exists():
         return False
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -129,15 +176,15 @@ def ensure_profile_file(root: Path, stem: str) -> bool:
     return True
 
 
-def bootstrap_workspace(root: Path) -> tuple[list[str], bool]:
+def bootstrap_workspace(skill_root: Path, data_root: Path) -> tuple[list[str], bool]:
     """把工作区补齐：画像空壳 + 常驻层模板。
 
     返回 (新建的画像文件名, 常驻层是否新建)。
     """
-    created = bootstrap_profile(root)
+    created = bootstrap_profile(skill_root, data_root)
     resident = False
-    source = root / TEMPLATE_RESIDENT
-    dest = root / RESIDENT
+    source = skill_root / TEMPLATE_RESIDENT
+    dest = data_root / RESIDENT
     if source.exists() and not dest.exists():
         write_atomic(dest, read(source))
         resident = True
@@ -235,9 +282,12 @@ def _stamp(path: Path) -> str:
     return moment.strftime("%Y-%m-%d %H:%M")
 
 
-def build_index(root: Path) -> Path:
-    """重建 profile/_index.md，返回它的路径。"""
-    files = profile_files(root)
+def build_index(skill_root: Path, data_root: Path) -> Path:
+    """重建数据根的 `profile/_index.md`，返回它的路径。
+
+    索引写在数据根（跟画像待在一起），技能版本从引擎根读，常驻层版本从数据根读。
+    """
+    files = profile_files(data_root)
     rows = []
     enabled = 0
     for path in files:
@@ -258,8 +308,8 @@ def build_index(root: Path) -> Path:
         "",
         "<!-- 自动生成，不要手改。由 scripts/validate.py 和 scripts/profile_write.py 维护。 -->",
         "",
-        f"- 技能版本：{skill_version(root)}",
-        f"- 常驻层版本：{resident_version(root)}",
+        f"- 技能版本：{skill_version(skill_root)}",
+        f"- 常驻层版本：{resident_version(data_root)}",
         f"- 已启用：{enabled} / {len(files)}",
         f"- 生成时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}",
         "",
@@ -268,7 +318,7 @@ def build_index(root: Path) -> Path:
     ]
     lines.extend(rows if rows else ["| （空） | — | — | — |"])
 
-    target = profile_dir(root) / INDEX_NAME
+    target = profile_dir(data_root) / INDEX_NAME
     target.parent.mkdir(parents=True, exist_ok=True)
     write_atomic(target, "\n".join(lines) + "\n")
     return target

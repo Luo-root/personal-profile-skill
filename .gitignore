@@ -9,6 +9,9 @@
 /inbox.md
 /resident-layer.md
 
+# 数据根指针：本机配置，指向画像所在目录，绝不能进仓库
+/.profile-root
+
 # 派生物：本机重建即可，不进仓库
 /.profile-state.json
 

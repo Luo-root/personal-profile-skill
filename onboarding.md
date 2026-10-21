@@ -10,8 +10,8 @@
 - 用户说「跳过 / 不知道 / 以后再说」就留空往下走，**不追问**。
 - 不得替用户编造答案，也不要把你的推测当成默认值填进去。
 - **每个阶段问完就落盘**（`propose` → `apply`），不要攒到最后——中途停下也不丢东西。
-- 落盘只走 `profile_write.py`，**不要直接用编辑器改 `profile/` 里的文件**——绕过了哈希基线就查不出是谁改的。
-- `profile/` 的空壳由脚本自动铺好（`templates/` → `profile/`），**不用手动建文件**。
+- 落盘只走 `profile_write.py`，**不要直接用编辑器改数据根里的 `profile/`**——绕过了哈希基线就查不出是谁改的。
+- 数据根的 `profile/` 空壳由脚本自动铺好（引擎根 `templates/` → 数据根 `profile/`），**不用手动建文件**。
 - 阶段跳过了要**说一声**，不要一声不响地略过。
 
 ## 阶段 0 · 开场
@@ -69,7 +69,7 @@
 
 1. **回看已写内容**：跑一次 `python scripts/validate.py`，把填充情况和结果原样报给用户。
    （这一步是**全量体检**，只在结束时跑一次；平时加载画像用 `--index-only`，见 SKILL.md。）
-2. **生成常驻层**：更新 `resident-layer.md`（这是给人拷进宿主常驻位的文件，不是给 Agent 读的画像）。
+2. **生成常驻层**：更新**数据根**里的 `resident-layer.md`（这是给人拷进宿主常驻位的文件，不是给 Agent 读的画像）。
    - 身份：从 `profile/who-i-am.md` 摘要成一句
    - 边界：从 `profile/boundaries.md` 里挑 `[硬]` 条目，**最多 3 条**；超过 3 条就问用户「哪三条进常驻层，其余留档案里」
    - 末尾保留 `常驻层 vN` 版本行；这次是首版就写 `v1`
@@ -77,8 +77,9 @@
    - **magpie**：Library（指令）→ 新建指令集 `personal-profile-skill` → 粘贴 `resident-layer.md` 全文 → 选给哪些 Agent
    - **MiniMax Code**：把 `resident-layer.md` 的正文（不含那段 HTML 注释）放进项目根 `AGENTS.md`，或存进用户级 Memory
    - **别的宿主**：该宿主自己的常驻指令位
-4. **把 skill 接进宿主**（magpie）：Library → 技能 → 新增 → 来源选**本机文件夹**，指向这个目录。不需要另外建仓库——magpie 会把它写进每个 Agent，并随它的加密备份一起同步。（具体菜单名以你当前 magpie 版本为准。）
-   别的宿主按各自的 skill 安装方式装，**装好后确认它指向的是这个目录**，不是某份拷贝。
+4. **把 skill 接进宿主**（magpie）：Library → 技能 → 新增 → 来源选**本机文件夹**，指向**引擎根**这个目录。不需要另外建仓库——magpie 会把它写进每个 Agent，并随它的加密备份一起同步。（具体菜单名以你当前 magpie 版本为准。）
+   **MiniMax Code**：`git clone` 到 `~/.minimax/skills/personal-profile-skill/`，再在那个目录写一行 `.profile-root`，内容是**数据根**的绝对路径。装完跑一次 `python ~/.minimax/skills/personal-profile-skill/scripts/validate.py --index-only`，它应该打印出你的数据根。
+   别的宿主按各自的 skill 安装方式装，**装好后确认它指向的是引擎根，并且 `.profile-root` 指对了数据根**。
 5. **再跑一次自检**：`python scripts/validate.py --baseline` 建基线，再 `--audit` 确认干净。
    注意退出码：没有基线时 `--audit` 返回 `2`，那是「没审过」，不是「审过了」。
 6. **给出空位地图**：把还没启用的项列成一张表，每行说清三件事——**它能解决什么、什么时候会用到、怎么开**。

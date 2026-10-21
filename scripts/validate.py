@@ -41,6 +41,7 @@ from profile_lib import (  # noqa: E402
     profile_files,
     rel,
     resident_version,
+    resolve_data_root,
     skill_version,
     strip_comments,
 )
@@ -72,16 +73,32 @@ def _utf8_output() -> None:
             pass
 
 
-def iter_markdown(root: Path):
-    for path in sorted(root.rglob("*.md")):
-        if any(part in SKIP_DIRS for part in path.parts):
+def iter_markdown(roots):
+    """扫多个根下的 Markdown，产出 (所属根, 文件)。
+
+    引擎根和数据根都要扫——密钥可能落在画像里，链接可能坏在模板里。
+    同一个文件只算一次（单目录布局时两个根是同一个）。
+    """
+    seen = set()
+    for root in roots:
+        if not root.is_dir():
             continue
-        yield path
+        for path in sorted(root.rglob("*.md")):
+            if any(part in SKIP_DIRS for part in path.parts):
+                continue
+            try:
+                key = path.resolve()
+            except OSError:
+                key = path
+            if key in seen:
+                continue
+            seen.add(key)
+            yield root, path
 
 
-def scan_secrets(root: Path, files):
+def scan_secrets(files):
     hard, soft = [], []
-    for path in files:
+    for root, path in files:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
@@ -89,15 +106,15 @@ def scan_secrets(root: Path, files):
             continue
         h, s = scan_text(text)
         for lineno, label, masked in h:
-            hard.append((path.relative_to(root), lineno, label, masked))
+            hard.append((_relative(root, path), lineno, label, masked))
         for lineno, label, masked in s:
-            soft.append((path.relative_to(root), lineno, label, masked))
+            soft.append((_relative(root, path), lineno, label, masked))
     return hard, soft
 
 
-def scan_links(root: Path, files):
+def scan_links(files):
     broken = []
-    for path in files:
+    for root, path in files:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -109,8 +126,16 @@ def scan_links(root: Path, files):
             if not clean:
                 continue
             if not (path.parent / clean).resolve().exists():
-                broken.append((path.relative_to(root), target))
+                broken.append((_relative(root, path), target))
     return broken
+
+
+def _relative(root: Path, path: Path) -> Path:
+    """尽量给出相对于所属根的路径；实在不在这棵树下就给绝对路径。"""
+    try:
+        return path.relative_to(root)
+    except ValueError:
+        return path
 
 
 # ---------------------------------------------------------------- 基线
@@ -202,7 +227,11 @@ def main() -> int:
             "2=无法执行（目录不存在、用法错误、--audit 时还没有基线）。"
         ),
     )
-    parser.add_argument("--root", default=None, help="画像根目录，默认是脚本的上一级")
+    parser.add_argument(
+        "--root",
+        default=None,
+        help="数据根目录（画像在哪）。默认读引擎根里的 .profile-root 指针，没有就用引擎根本身。",
+    )
     parser.add_argument("--baseline", action="store_true", help="记录当前画像的哈希基线")
     parser.add_argument("--audit", action="store_true", help="比对基线，查出绕过脚本的改动")
     parser.add_argument("--no-index", action="store_true", help="不刷新索引")
@@ -213,34 +242,41 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent
-    if not root.is_dir():
-        print(f"[x] 不是一个目录：{root}")
+    # 引擎根 = 脚本的上一级；数据根 = --root > .profile-root 指针 > 引擎根
+    skill_root = Path(__file__).resolve().parent.parent
+    data_root = resolve_data_root(skill_root, args.root)
+    if not skill_root.is_dir():
+        print(f"[x] 引擎根不是一个目录：{skill_root}")
+        return EXIT_CANNOT
+    if not data_root.is_dir():
+        print(f"[x] 数据根不是一个目录：{data_root}")
         return EXIT_CANNOT
 
-    # 首次运行：把 templates/ 里的空壳铺进 profile/，常驻层模板铺到根目录
-    created, resident = bootstrap_workspace(root)
+    # 首次运行：把引擎根 templates/ 里的空壳铺进数据根 profile/，常驻层模板铺到数据根
+    created, resident = bootstrap_workspace(skill_root, data_root)
     if created:
         print(f"[ok] 已初始化 {len(created)} 份画像空壳：{', '.join(created)}")
     if resident:
         print("[ok] 已生成 resident-layer.md（待填）")
 
     if args.index_only:
-        target = build_index(root)
-        print(f"[ok] 索引已刷新：{rel(root, target)}")
+        target = build_index(skill_root, data_root)
+        print(f"数据根 {data_root}")
+        print(f"[ok] 索引已刷新：{rel(data_root, target)}")
         return EXIT_OK
 
     if args.baseline:
-        code = build_baseline(root)
-        _refresh_index(root, args)
+        code = build_baseline(data_root)
+        _refresh_index(skill_root, data_root, args)
         return code
 
-    files = list(iter_markdown(root))
-    print(f"扫描 {root}")
+    files = list(iter_markdown([skill_root, data_root]))
+    print(f"引擎根 {skill_root}")
+    print(f"数据根 {data_root}")
     print(f"共 {len(files)} 个 Markdown 文件\n")
 
-    hard, soft = scan_secrets(root, files)
-    broken = scan_links(root, files)
+    hard, soft = scan_secrets(files)
+    broken = scan_links(files)
 
     if hard:
         print("[x] 发现密钥或敏感标识，必须删掉再提交：")
@@ -263,16 +299,16 @@ def main() -> int:
 
     print("\n画像填充情况（空 = 未启用，不是错误）：")
     empty = []
-    for path in profile_files(root):
+    for path in profile_files(data_root):
         if is_empty(path):
             print(f"    [--] {path.name}  空")
             empty.append(path.name)
         else:
             print(f"    [ok] {path.name}  已填写")
-    if not profile_files(root):
+    if not profile_files(data_root):
         print("    （profile/ 下还没有数据文件）")
 
-    boundaries = root / "profile" / "boundaries.md"
+    boundaries = data_root / "profile" / "boundaries.md"
     if boundaries.exists():
         text = strip_comments(boundaries.read_text(encoding="utf-8", errors="replace"))
         hard_count = len(re.findall(r"^###\s*\[硬\]", text, re.M))
@@ -285,9 +321,9 @@ def main() -> int:
             print("\n[!] 还没有任何 [硬] 边界。这是整份画像里最值钱的一块，建议至少写一条。")
 
     # 模块目录与主文件的模块表要对得上，否则「主文件里查不到这个模块」
-    modules = root / "modules"
+    modules = skill_root / "modules"
     if modules.is_dir():
-        skill_doc = root / "SKILL.md"
+        skill_doc = skill_root / "SKILL.md"
         skill_text = skill_doc.read_text(encoding="utf-8", errors="replace") if skill_doc.exists() else ""
         unlisted = []
         for directory in sorted(modules.iterdir()):
@@ -302,7 +338,7 @@ def main() -> int:
                 print(f"    {name}")
             print("    在主文件补一行，否则 Agent 不知道该在什么时候读它。")
 
-    resident = root / "resident-layer.md"
+    resident = data_root / "resident-layer.md"
     if resident.exists():
         text = strip_comments(resident.read_text(encoding="utf-8", errors="replace"))
         placeholders = re.findall(r"<[^<>\n]{1,40}>", text)
@@ -313,16 +349,16 @@ def main() -> int:
         lines = [line for line in text.splitlines() if line.strip()]
         if len(lines) > 22:
             print(f"\n[!] 常驻层有 {len(lines)} 行，建议压到 20 行以内——贴满了没人看。")
-        print(f"\n常驻层版本：{resident_version(root)}　技能版本：{skill_version(root)}")
+        print(f"\n常驻层版本：{resident_version(data_root)}　技能版本：{skill_version(skill_root)}")
         print("    常驻层版本的比对对象是「宿主常驻位里粘的那份」，不是技能版本——")
         print("    Agent 在系统提示里看到旧版本号时，提醒用户重粘即可。")
 
     exit_code = EXIT_OK
     if args.audit:
         print()
-        exit_code = audit(root)
+        exit_code = audit(data_root)
 
-    _refresh_index(root, args)
+    _refresh_index(skill_root, data_root, args)
 
     print()
     if hard:
@@ -342,12 +378,12 @@ def main() -> int:
     return EXIT_OK
 
 
-def _refresh_index(root: Path, args) -> None:
+def _refresh_index(skill_root: Path, data_root: Path, args) -> None:
     if args.no_index:
         return
     try:
-        target = build_index(root)
-        print(f"[ok] 索引已刷新：{rel(root, target)}")
+        target = build_index(skill_root, data_root)
+        print(f"[ok] 索引已刷新：{rel(data_root, target)}")
     except OSError as exc:
         print(f"[!] 索引刷新失败：{exc}")
 

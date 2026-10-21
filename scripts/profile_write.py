@@ -34,6 +34,7 @@ from profile_lib import (  # noqa: E402
     profile_files,
     read,
     rel,
+    resolve_data_root,
     write_atomic,
 )
 from scan_rules import scan_text  # noqa: E402
@@ -216,13 +217,13 @@ def write_section(root: Path, rel_path: str, section: str, text: str, replace: b
     write_atomic(path, "\n".join(new_lines) + "\n")
 
 
-def cmd_propose(root: Path, args) -> int:
-    available = targets(root)
+def cmd_propose(skill_root: Path, data_root: Path, args) -> int:
+    available = targets(data_root)
     if args.file not in available:
-        # 目标画像还没有：先从 templates/ 铺空壳，再补这一份
-        bootstrap_profile(root)
-        ensure_profile_file(root, args.file)
-        available = targets(root)
+        # 目标画像还没有：先从引擎根 templates/ 铺空壳，再补这一份
+        bootstrap_profile(skill_root, data_root)
+        ensure_profile_file(skill_root, data_root, args.file)
+        available = targets(data_root)
     if args.file not in available:
         raise SystemExit(
             "x 未知目标：{name}\n  现有：{items}\n"
@@ -248,7 +249,7 @@ def cmd_propose(root: Path, args) -> int:
         print("  凭据不要进画像。需要时只写「去哪取、怎么验活」。")
         return 1
 
-    inbox_path = root / "inbox.md"
+    inbox_path = data_root / "inbox.md"
     entries = parse_inbox(read(inbox_path)) if inbox_path.exists() else []
     entry_id = hashlib.sha256(
         (args.text + args.why + datetime.datetime.now().isoformat()).encode("utf-8")
@@ -284,29 +285,29 @@ def _find(root: Path, entry_id: str):
     return entries, match
 
 
-def cmd_apply(root: Path, args) -> int:
-    entries, entry = _find(root, args.id)
+def cmd_apply(skill_root: Path, data_root: Path, args) -> int:
+    entries, entry = _find(data_root, args.id)
     if entry["status"] == "declined":
         raise SystemExit("x 这条已经被拒绝，不能合并")
     if entry["status"] == "applied":
         raise SystemExit("x 这条已经合并过了")
 
-    available = targets(root)
+    available = targets(data_root)
     if entry["target"] not in available:
-        bootstrap_profile(root)
-        ensure_profile_file(root, entry["target"])
-        available = targets(root)
+        bootstrap_profile(skill_root, data_root)
+        ensure_profile_file(skill_root, data_root, entry["target"])
+        available = targets(data_root)
     if entry["target"] not in available:
         raise SystemExit(f"x 目标文件已经不存在了：{entry['target']}")
 
     rel_path = available[entry["target"]]
-    write_section(root, rel_path, entry["section"], entry["text"], entry.get("mode") == "replace")
+    write_section(data_root, rel_path, entry["section"], entry["text"], entry.get("mode") == "replace")
     entry["status"] = "applied"
-    write_atomic(root / "inbox.md", render_inbox(entries))
+    write_atomic(data_root / "inbox.md", render_inbox(entries))
 
-    state = load_state(root)
-    record_hash(root, state, rel_path, entry["id"])
-    build_index(root)
+    state = load_state(data_root)
+    record_hash(data_root, state, rel_path, entry["id"])
+    build_index(skill_root, data_root)
 
     print(f"[ok] 已合并进 {rel_path} -> ## {entry['section']}")
     print(f"     哈希已记入 .profile-state.json（条目 {entry['id']}），索引已刷新")
@@ -357,11 +358,15 @@ def main() -> int:
     common.add_argument(
         "--root",
         default=argparse.SUPPRESS,
-        help="画像根目录，默认是脚本的上一级",
+        help="数据根目录（画像在哪）。默认读引擎根里的 .profile-root 指针，没有就用引擎根本身。",
     )
 
     parser = argparse.ArgumentParser(description="画像的唯一写入通道")
-    parser.add_argument("--root", default=None, help="画像根目录，默认是脚本的上一级")
+    parser.add_argument(
+        "--root",
+        default=None,
+        help="数据根目录（画像在哪）。默认读引擎根里的 .profile-root 指针，没有就用引擎根本身。",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("propose", help="提议一条，写进 inbox", parents=[common])
@@ -385,17 +390,21 @@ def main() -> int:
     sub.add_parser("status", help="列出 inbox", parents=[common])
 
     args = parser.parse_args()
-    root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent
-    if not root.is_dir():
-        raise SystemExit(f"x 不是一个目录：{root}")
+    # 引擎根 = 脚本的上一级；数据根 = --root > .profile-root 指针 > 引擎根
+    skill_root = Path(__file__).resolve().parent.parent
+    data_root = resolve_data_root(skill_root, args.root)
+    if not data_root.is_dir():
+        raise SystemExit(f"x 数据根不是一个目录：{data_root}")
 
-    handler = {
-        "propose": cmd_propose,
-        "apply": cmd_apply,
+    if args.command in ("propose", "apply"):
+        return {
+            "propose": cmd_propose,
+            "apply": cmd_apply,
+        }[args.command](skill_root, data_root, args)
+    return {
         "decline": cmd_decline,
         "status": cmd_status,
-    }[args.command]
-    return handler(root, args)
+    }[args.command](data_root, args)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-4f46e5" alt="version">
+  <img src="https://img.shields.io/badge/version-0.3.0-4f46e5" alt="version">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="license">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555" alt="platform">
   <img src="https://img.shields.io/badge/format-Agent%20Skill-0ea5e9" alt="format">
@@ -38,24 +38,36 @@ skill 会被 Agent 读进上下文，而上下文会发到模型供应商。换 
 
 ## 模板和你的数据是分开的
 
-仓库里只有**空壳**：
+这个 skill 有两个根，互不牵连：
+
+**引擎根**（技能本体，公开的仓库就是它）：
 
 ```
-templates/profile/        六份画像的空壳
-templates/resident-layer.md
+SKILL.md  onboarding.md  scripts/  templates/  modules/  assets/
 ```
 
-你的东西在**本机**，被 `.gitignore` 挡住，不进仓库、不跟着推送走：
+**数据根**（你的画像，只在本机）：
 
 ```
-profile/                  你的画像（真相源）
+profile/                  画像真相源
 inbox.md                  待合并 / 已拒绝
 resident-layer.md         常驻层摘要
 .profile-state.json       哈希基线
 ```
 
-所以**这个仓库可以放心公开**，而你的画像不会跟着走。工作区第一次启动时，脚本会把空壳自动
-铺进 `profile/`——你不用手动建文件。
+两个根之间靠引擎根里的一个本机文件 `.profile-root` 挂钩，内容就是数据根的绝对路径：
+
+```
+D:\Github-Project\personal-profile-data
+```
+
+**这样设计的后果，正是你要的**：
+
+- 公开仓库里只有模板，一行个人数据都没有；
+- 你的画像连**本机的 skill 仓库**都不在里面——它在一个独立的目录里；
+- **技能结构怎么重构都不影响画像的位置**，因为路径记在指针文件里，不记在代码里。
+
+想换台机器，拷数据根那一个目录就行。
 
 ## 四步跑起来
 
@@ -63,13 +75,32 @@ resident-layer.md         常驻层摘要
 2. **让 Agent 采集**：对新 Agent 说「读 `SKILL.md` 和 `onboarding.md`，帮我建个人画像」。阶段 1 只问 5 个问题，**每阶段问完就落盘**，中途停下也不丢。
 3. **装进你的 Agent**：
    - **magpie**：Library → 技能 → 新增 → 来源选**本机文件夹**，指向这个目录。不用另外建仓库。
-   - **MiniMax Code**：把仓库放进 `~/.minimax/skills/personal-profile-skill/`。用目录联接
-     （junction）指回你本地这个目录最好——一份数据，改哪边都生效，也不会被 `git pull` 打架。
+   - **MiniMax Code**：`git clone` 到 `~/.minimax/skills/personal-profile-skill/`，再写一行 `.profile-root` 指到数据根。
    - 别的宿主按各自的 skill 安装方式装，**装好后确认它指向的是这个目录**，不是某份拷贝。
 4. **贴常驻层**：把生成的 `resident-layer.md` 粘进宿主的常驻位——magpie 的「指令」，
    MiniMax Code 的 `AGENTS.md` 或用户级 Memory。
 
 第 3、4 步的菜单名以你当前那个宿主的版本为准。
+
+### MiniMax Code 的安装命令
+
+```powershell
+git clone https://github.com/Luo-root/personal-profile-skill.git "$env:USERPROFILE\.minimax\skills\personal-profile-skill"
+Set-Content "$env:USERPROFILE\.minimax\skills\personal-profile-skill\.profile-root" "D:\Github-Project\personal-profile-data"
+```
+
+macOS / Linux：
+
+```sh
+git clone https://github.com/Luo-root/personal-profile-skill.git ~/.minimax/skills/personal-profile-skill
+echo "/path/to/your/data-root" > ~/.minimax/skills/personal-profile-skill/.profile-root
+```
+
+装完验证一下——它应该打印出你的数据根：
+
+```sh
+python ~/.minimax/skills/personal-profile-skill/scripts/validate.py --index-only
+```
 
 ## 怎么加载
 
@@ -80,8 +111,9 @@ Agent 不会一次读全量：
 3. 能回答当前问题就停手
 
 索引由脚本生成，不手写，所以不会漂。索引不存在或过期时跑
-`python scripts/validate.py --index-only` 重建——**只重建索引，不做全量体检**。
-机器上没有 Python 也能读：直接列 `profile/` 下的文件，看每份的小节有没有正文。
+`python scripts/validate.py --index-only` 重建——**只重建索引，不做全量体检**，
+输出会告诉你数据根在哪。机器上没有 Python 也能读：读 `.profile-root` 找到数据根，
+再列 `profile/` 下的文件，看每份的小节有没有正文。
 
 
 ## 之后怎么维护
@@ -152,13 +184,13 @@ python .selftest/selftest.py
 
 ## 升级模板
 
-模板没有内置升级机制，但模板和你的数据本来就分在两个地方：
+模板没有内置升级机制，但模板和你的数据本来就分在两个根：
 
-| 模板文件（可整体替换） | 你的数据（替换时保留） |
+| 引擎根（可整体替换） | 数据根（绝对别动） |
 | --- | --- |
-| `SKILL.md`、`onboarding.md`、`modules/`、`scripts/`、`templates/` | `profile/`、`inbox.md`、`resident-layer.md` |
+| `SKILL.md`、`onboarding.md`、`modules/`、`scripts/`、`templates/` | `profile/`、`inbox.md`、`resident-layer.md`、`.profile-state.json` |
 
-换新版时只覆盖左列，右列别动——右列已经被 `.gitignore` 挡住了，正常不会被动。
+换新版时只换左列，右列根本不在同一个目录里，碰不到。
 `profile/_index.md` 是派生物，可以删，下次跑 `--index-only` 会自动重建。
 
 ## 许可证
@@ -178,11 +210,12 @@ MIT。拿去改、拿去用，保留版权声明即可。
 | `LICENSE` | MIT | 是 |
 | `scripts/profile_write.py` | 唯一写入通道 | 是 |
 | `scripts/validate.py` | 自检 + 基线比对 + 刷新索引 | 是 |
-| `scripts/profile_lib.py` | 文件发现、空判定、索引生成、模板初始化（共用） | 是 |
+| `scripts/profile_lib.py` | 文件发现、空判定、索引生成、模板初始化、双根解析（共用） | 是 |
 | `scripts/scan_rules.py` | 密钥特征（共用） | 是 |
-| `.selftest/selftest.py` | 自测套件（模拟新 clone 跑全链路） | 是 |
-| `profile/` | **你的**画像真相源 | 否（gitignore） |
-| `profile/_index.md` | 索引（脚本生成） | 否 |
-| `resident-layer.md` | **你的**常驻层（生成物，带版本号） | 否 |
-| `inbox.md` | **你的**待合并 / 已拒绝 | 否 |
-| `.profile-state.json` | 哈希基线（脚本自动维护） | 否 |
+| `.selftest/selftest.py` | 自测套件（两种布局各跑一遍全链路） | 是 |
+| `.profile-root` | 本机文件：指向数据根的绝对路径 | 否（gitignore） |
+| **数据根** `profile/` | **你的**画像真相源 | 否（在仓库外） |
+| **数据根** `profile/_index.md` | 索引（脚本生成） | 否 |
+| **数据根** `resident-layer.md` | **你的**常驻层（生成物，带版本号） | 否 |
+| **数据根** `inbox.md` | **你的**待合并 / 已拒绝 | 否 |
+| **数据根** `.profile-state.json` | 哈希基线（脚本自动维护） | 否 |
