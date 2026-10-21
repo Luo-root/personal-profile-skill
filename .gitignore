@@ -1,5 +1,19 @@
+# 个人数据：本机持有，不进仓库。
+# 公开仓库只保留 templates/ 下的空壳模板；
+# 你的画像、待办、常驻层都留在本机，不推送。
+#
+# 注意：这些模式必须带前导斜杠。
+# 不带的话 `profile/` 会匹配任意层级（含 templates/profile/），
+# `resident-layer.md` 会匹配 templates/resident-layer.md——模板会被一起屏蔽掉。
+/profile/
+/inbox.md
+/resident-layer.md
+
 # 派生物：本机重建即可，不进仓库
-profile/_index.md
-.profile-state.json
+/.profile-state.json
+
+# 自测产物：留脚本，不留每次跑出来的干净工作区
+/.selftest/fresh-*/
+
 __pycache__/
 *.pyc

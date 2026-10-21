@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 """personal-profile 自检。
 
-三件事：
+四件事：
 1. 密钥扫描——唯一会失败的一项
 2. 结构检查——死链、空段统计、硬边界条数、常驻层占位符与行数
 3. 基线比对——`--baseline` 建基线，`--audit` 查出「绕过脚本直接改 profile/」的改动
+4. 索引重建——默认顺带刷新；`--index-only` 只干这一件事
 
 「缺失即跳过」是这份画像的正常语义：空段不是缺陷，不报错、不催填。
 
+退出码契约（脚本化调用必须按这个判断，别靠猜）：
+    0  通过
+    1  失败——发现密钥，或审计查出绕过脚本的改动
+    2  无法执行——目录不存在、参数用法错误、或 `--audit` 时还没有基线
+
+注意 2 和 0 的区别：「没有基线所以没审」不等于「审过了所以干净」。
+没有基线时 `--audit` 返回 2，不会伪装成通过。
+
 用法：
     python scripts/validate.py
+    python scripts/validate.py --index-only    # Agent 加载时只重建索引
     python scripts/validate.py --baseline
     python scripts/validate.py --audit
 """
@@ -25,6 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from profile_lib import (  # noqa: E402
+    bootstrap_workspace,
     build_index,
     is_empty,
     profile_files,
@@ -38,6 +49,10 @@ from scan_rules import scan_text  # noqa: E402
 SKIP_DIRS = {".git", "__pycache__", "node_modules"}
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+
+EXIT_OK = 0
+EXIT_FAIL = 1
+EXIT_CANNOT = 2
 
 
 def _utf8_output() -> None:
@@ -134,8 +149,9 @@ def build_baseline(root: Path) -> int:
 def audit(root: Path) -> int:
     state = load_state(root)
     if state is None:
-        print("[!] 还没有基线。先跑一次：python scripts/validate.py --baseline")
-        return 0
+        print("[!] 还没有基线，无从审计。先跑一次：python scripts/validate.py --baseline")
+        print("    （返回 2：「没审过」不等于「审过了干净」）")
+        return EXIT_CANNOT
 
     recorded = state.get("files", {})
     drift, untracked = [], []
@@ -174,22 +190,45 @@ def audit(root: Path) -> int:
         if pending:
             print(f"[!] inbox 里还有 {pending} 条待合并（apply 或 decline 都行）")
 
-    return 1 if drift else 0
+    return EXIT_FAIL if drift else EXIT_OK
 
 
 def main() -> int:
     _utf8_output()
-    parser = argparse.ArgumentParser(description="personal-profile 自检")
+    parser = argparse.ArgumentParser(
+        description="personal-profile 自检",
+        epilog=(
+            "退出码：0=通过；1=失败（发现密钥，或审计查出绕过脚本的改动）；"
+            "2=无法执行（目录不存在、用法错误、--audit 时还没有基线）。"
+        ),
+    )
     parser.add_argument("--root", default=None, help="画像根目录，默认是脚本的上一级")
     parser.add_argument("--baseline", action="store_true", help="记录当前画像的哈希基线")
     parser.add_argument("--audit", action="store_true", help="比对基线，查出绕过脚本的改动")
     parser.add_argument("--no-index", action="store_true", help="不刷新索引")
+    parser.add_argument(
+        "--index-only",
+        action="store_true",
+        help="只重建索引，不做其他检查——Agent 加载画像时用这一条",
+    )
     args = parser.parse_args()
 
     root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent
     if not root.is_dir():
         print(f"[x] 不是一个目录：{root}")
-        return 2
+        return EXIT_CANNOT
+
+    # 首次运行：把 templates/ 里的空壳铺进 profile/，常驻层模板铺到根目录
+    created, resident = bootstrap_workspace(root)
+    if created:
+        print(f"[ok] 已初始化 {len(created)} 份画像空壳：{', '.join(created)}")
+    if resident:
+        print("[ok] 已生成 resident-layer.md（待填）")
+
+    if args.index_only:
+        target = build_index(root)
+        print(f"[ok] 索引已刷新：{rel(root, target)}")
+        return EXIT_OK
 
     if args.baseline:
         code = build_baseline(root)
@@ -275,10 +314,10 @@ def main() -> int:
         if len(lines) > 22:
             print(f"\n[!] 常驻层有 {len(lines)} 行，建议压到 20 行以内——贴满了没人看。")
         print(f"\n常驻层版本：{resident_version(root)}　技能版本：{skill_version(root)}")
-        print("    常驻层版本的比对对象是「magpie 指令里粘的那份」，不是技能版本——")
-        print("    Agent 在系统提示里看到旧版本号时，提醒重粘即可。")
+        print("    常驻层版本的比对对象是「宿主常驻位里粘的那份」，不是技能版本——")
+        print("    Agent 在系统提示里看到旧版本号时，提醒用户重粘即可。")
 
-    exit_code = 0
+    exit_code = EXIT_OK
     if args.audit:
         print()
         exit_code = audit(root)
@@ -289,15 +328,18 @@ def main() -> int:
     if hard:
         print("结果：失败。先删掉上面的密钥，再重新跑一次。")
         print("如果这些值是真的，请立刻吊销并重新签发——它已经进过文件了。")
-        return 1
-    if exit_code:
+        return EXIT_FAIL
+    if exit_code == EXIT_FAIL:
         print("结果：有改动绕过了写入脚本。")
-        return 1
+        return EXIT_FAIL
+    if exit_code == EXIT_CANNOT:
+        print("结果：无法完成审计——没有基线可比。先跑一次 --baseline。")
+        return EXIT_CANNOT
 
     print("结果：通过。")
     if empty:
         print(f"有 {len(empty)} 份画像是空的，跳过即可；需要时再补。")
-    return 0
+    return EXIT_OK
 
 
 def _refresh_index(root: Path, args) -> None:

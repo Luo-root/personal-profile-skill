@@ -1,9 +1,12 @@
-"""画像的公共操作：文件发现、空判定、原子写、索引生成。
+"""画像的公共操作：文件发现、空判定、原子写、索引生成、模板初始化。
 
 `validate.py` 和 `profile_write.py` 都从这里取，避免「检查时一套、写入时另一套」。
 
 为什么要生成索引：Agent 判断「哪份填了、要不要展开」，不该去读六份文件才知道。
 索引由脚本生成、不手写——手写的索引一定会漂。
+
+为什么要分模板和数据：`templates/` 里是空壳，`profile/` 里是你的画像。
+公开仓库只留空壳，画像留在本机——这样仓库可以公开，画像不会跟着走。
 """
 
 from __future__ import annotations
@@ -18,6 +21,9 @@ PROFILE_DIR = "profile"
 INDEX_NAME = "_index.md"
 RESIDENT = "resident-layer.md"
 SKILL_DOC = "SKILL.md"
+# 空壳模板所在目录：仓库里只有它，profile/ 是本机数据目录
+TEMPLATE_DIR = "templates/profile"
+TEMPLATE_RESIDENT = "templates/resident-layer.md"
 
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
@@ -81,6 +87,61 @@ def write_atomic(path: Path, text: str) -> None:
 
 def strip_comments(text: str) -> str:
     return COMMENT_RE.sub("", text)
+
+
+# ---------------------------------------------------------------- 模板初始化
+
+
+def bootstrap_profile(root: Path) -> list[str]:
+    """新工作区初始化：把 `templates/profile/` 里的空壳复制到 `profile/`。
+
+    只在「全新」时做——`profile/` 不存在，或里面一份画像都没有。
+    已有画像不动，也不复活用户主动删掉的那些。
+    返回新建的文件名。
+    """
+    source = root / TEMPLATE_DIR
+    target = root / PROFILE_DIR
+    if not source.is_dir():
+        return []
+    if target.is_dir() and any(target.glob("*.md")):
+        return []
+    target.mkdir(parents=True, exist_ok=True)
+    created = []
+    for path in sorted(source.glob("*.md")):
+        dest = target / path.name
+        if not dest.exists():
+            write_atomic(dest, read(path))
+            created.append(path.name)
+    return created
+
+
+def ensure_profile_file(root: Path, stem: str) -> bool:
+    """补一份指定画像：`profile/<stem>.md` 不存在时，从模板复制一份过来。
+
+    模板里也没有就别造——让调用方提示用户自己建带 `##` 小节的文件。
+    """
+    source = root / TEMPLATE_DIR / f"{stem}.md"
+    dest = root / PROFILE_DIR / f"{stem}.md"
+    if dest.exists() or not source.exists():
+        return False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    write_atomic(dest, read(source))
+    return True
+
+
+def bootstrap_workspace(root: Path) -> tuple[list[str], bool]:
+    """把工作区补齐：画像空壳 + 常驻层模板。
+
+    返回 (新建的画像文件名, 常驻层是否新建)。
+    """
+    created = bootstrap_profile(root)
+    resident = False
+    source = root / TEMPLATE_RESIDENT
+    dest = root / RESIDENT
+    if source.exists() and not dest.exists():
+        write_atomic(dest, read(source))
+        resident = True
+    return created, resident
 
 
 def is_empty(path: Path) -> bool:
@@ -208,5 +269,6 @@ def build_index(root: Path) -> Path:
     lines.extend(rows if rows else ["| （空） | — | — | — |"])
 
     target = profile_dir(root) / INDEX_NAME
+    target.parent.mkdir(parents=True, exist_ok=True)
     write_atomic(target, "\n".join(lines) + "\n")
     return target

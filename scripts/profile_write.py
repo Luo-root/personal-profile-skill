@@ -28,7 +28,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from profile_lib import (  # noqa: E402
+    bootstrap_profile,
     build_index,
+    ensure_profile_file,
     profile_files,
     read,
     rel,
@@ -217,8 +219,15 @@ def write_section(root: Path, rel_path: str, section: str, text: str, replace: b
 def cmd_propose(root: Path, args) -> int:
     available = targets(root)
     if args.file not in available:
+        # 目标画像还没有：先从 templates/ 铺空壳，再补这一份
+        bootstrap_profile(root)
+        ensure_profile_file(root, args.file)
+        available = targets(root)
+    if args.file not in available:
         raise SystemExit(
-            "x 未知目标：{name}\n  现有：{items}\n  想加新的一份，就在 profile/ 下建一个 .md（带 ## 小节），脚本会自动认。".format(
+            "x 未知目标：{name}\n  现有：{items}\n"
+            "  想加新的一份：先在 profile/ 下建一个带 ## 小节的 .md，脚本会自动认；\n"
+            "  或者在 templates/profile/ 下放一份空壳，让脚本自动复制。".format(
                 name=args.file, items=", ".join(available) or "（还没有）"
             )
         )
@@ -284,6 +293,10 @@ def cmd_apply(root: Path, args) -> int:
 
     available = targets(root)
     if entry["target"] not in available:
+        bootstrap_profile(root)
+        ensure_profile_file(root, entry["target"])
+        available = targets(root)
+    if entry["target"] not in available:
         raise SystemExit(f"x 目标文件已经不存在了：{entry['target']}")
 
     rel_path = available[entry["target"]]
@@ -338,11 +351,20 @@ def cmd_status(root: Path, args) -> int:
 
 def main() -> int:
     _utf8_output()
+    # `--root` 在子命令前后都能写：validate.py 是后置的，这里要跟它对齐，
+    # 否则同一条命令在两个脚本里位置不一样，脚本化调用很容易踩。
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--root",
+        default=argparse.SUPPRESS,
+        help="画像根目录，默认是脚本的上一级",
+    )
+
     parser = argparse.ArgumentParser(description="画像的唯一写入通道")
     parser.add_argument("--root", default=None, help="画像根目录，默认是脚本的上一级")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("propose", help="提议一条，写进 inbox")
+    p = sub.add_parser("propose", help="提议一条，写进 inbox", parents=[common])
     p.add_argument("--file", required=True, help="目标文件名词干，如 who-i-am")
     p.add_argument("--section", required=True, help="写进哪个 ## 小节")
     p.add_argument("--text", required=True, help="原文，逐字")
@@ -353,14 +375,14 @@ def main() -> int:
         help="整段替换该小节，而不是追加（改口、纠正时用）",
     )
 
-    a = sub.add_parser("apply", help="把条目合并进 profile")
+    a = sub.add_parser("apply", help="把条目合并进 profile", parents=[common])
     a.add_argument("id")
 
-    d = sub.add_parser("decline", help="标记为拒绝")
+    d = sub.add_parser("decline", help="标记为拒绝", parents=[common])
     d.add_argument("id")
     d.add_argument("--reason", default="")
 
-    sub.add_parser("status", help="列出 inbox")
+    sub.add_parser("status", help="列出 inbox", parents=[common])
 
     args = parser.parse_args()
     root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent
