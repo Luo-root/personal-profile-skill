@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""personal-profile 自检。
+
+三件事：
+1. 密钥扫描——唯一会失败的一项
+2. 结构检查——死链、空段统计、硬边界条数、常驻层占位符与行数
+3. 基线比对——`--baseline` 建基线，`--audit` 查出「绕过脚本直接改 profile/」的改动
+
+「缺失即跳过」是这份画像的正常语义：空段不是缺陷，不报错、不催填。
+
+用法：
+    python scripts/validate.py
+    python scripts/validate.py --baseline
+    python scripts/validate.py --audit
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from profile_lib import (  # noqa: E402
+    build_index,
+    is_empty,
+    profile_files,
+    rel,
+    resident_version,
+    skill_version,
+    strip_comments,
+)
+from scan_rules import scan_text  # noqa: E402
+
+SKIP_DIRS = {".git", "__pycache__", "node_modules"}
+LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+
+
+def _utf8_output() -> None:
+    """Windows 默认 GBK，中文和符号会直接抛 UnicodeEncodeError。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        except Exception:
+            pass
+
+
+def iter_markdown(root: Path):
+    for path in sorted(root.rglob("*.md")):
+        if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        yield path
+
+
+def scan_secrets(root: Path, files):
+    hard, soft = [], []
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            print(f"[!] 读不了 {path}: {exc}")
+            continue
+        h, s = scan_text(text)
+        for lineno, label, masked in h:
+            hard.append((path.relative_to(root), lineno, label, masked))
+        for lineno, label, masked in s:
+            soft.append((path.relative_to(root), lineno, label, masked))
+    return hard, soft
+
+
+def scan_links(root: Path, files):
+    broken = []
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for target in LINK_RE.findall(COMMENT_RE.sub("", text)):
+            if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            clean = target.split("#", 1)[0].strip()
+            if not clean:
+                continue
+            if not (path.parent / clean).resolve().exists():
+                broken.append((path.relative_to(root), target))
+    return broken
+
+
+# ---------------------------------------------------------------- 基线
+
+def state_path(root: Path) -> Path:
+    return root / ".profile-state.json"
+
+
+def load_state(root: Path):
+    path = state_path(root)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def build_baseline(root: Path) -> int:
+    state = {"version": 1, "files": {}}
+    count = 0
+    for path in profile_files(root):
+        state["files"][rel(root, path)] = {
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "entry": "baseline",
+        }
+        count += 1
+    state_path(root).write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    print(f"[ok] 已为 {count} 份画像建立基线")
+    print("     以后用 --audit 查「绕过脚本直接改文件」的改动。")
+    return 0
+
+
+def audit(root: Path) -> int:
+    state = load_state(root)
+    if state is None:
+        print("[!] 还没有基线。先跑一次：python scripts/validate.py --baseline")
+        return 0
+
+    recorded = state.get("files", {})
+    drift, untracked = [], []
+    for path in profile_files(root):
+        rel_path = rel(root, path)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        known = recorded.get(rel_path)
+        if known is None:
+            if not is_empty(path):
+                untracked.append(rel_path)
+        elif known.get("sha256") != digest:
+            drift.append((rel_path, known.get("entry", "?")))
+
+    if drift:
+        print("[x] 这些文件在基线之后被改过，而且不是通过 profile_write.py：")
+        for rel_path, entry in drift:
+            print(f"    {rel_path}  （基线条目 {entry}）")
+        print("    要么用脚本重写一遍，要么确认改动后重建基线：--baseline")
+    elif untracked:
+        print("[!] 这些文件有内容但不在基线里（可能是手写的）：")
+        for rel_path in untracked:
+            print(f"    {rel_path}")
+        print("    确认后跑一次 --baseline 收进基线。")
+    else:
+        print("[ok] 没有发现绕过脚本的改动")
+
+    inbox = root / "inbox.md"
+    if inbox.exists():
+        pending = len(
+            re.findall(
+                r"^- 状态：pending\s*$",
+                inbox.read_text(encoding="utf-8", errors="replace"),
+                re.M,
+            )
+        )
+        if pending:
+            print(f"[!] inbox 里还有 {pending} 条待合并（apply 或 decline 都行）")
+
+    return 1 if drift else 0
+
+
+def main() -> int:
+    _utf8_output()
+    parser = argparse.ArgumentParser(description="personal-profile 自检")
+    parser.add_argument("--root", default=None, help="画像根目录，默认是脚本的上一级")
+    parser.add_argument("--baseline", action="store_true", help="记录当前画像的哈希基线")
+    parser.add_argument("--audit", action="store_true", help="比对基线，查出绕过脚本的改动")
+    parser.add_argument("--no-index", action="store_true", help="不刷新索引")
+    args = parser.parse_args()
+
+    root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent
+    if not root.is_dir():
+        print(f"[x] 不是一个目录：{root}")
+        return 2
+
+    if args.baseline:
+        code = build_baseline(root)
+        _refresh_index(root, args)
+        return code
+
+    files = list(iter_markdown(root))
+    print(f"扫描 {root}")
+    print(f"共 {len(files)} 个 Markdown 文件\n")
+
+    hard, soft = scan_secrets(root, files)
+    broken = scan_links(root, files)
+
+    if hard:
+        print("[x] 发现密钥或敏感标识，必须删掉再提交：")
+        for rel_path, lineno, label, masked in hard:
+            print(f"    {rel_path}:{lineno}  {label}  {masked}")
+    else:
+        print("[ok] 没发现密钥或敏感标识")
+
+    if soft:
+        print("\n[!] 这些地方像是密钥赋值，请人眼确认（不一定是错）：")
+        for rel_path, lineno, label, masked in soft:
+            print(f"    {rel_path}:{lineno}  {label}  {masked}")
+
+    if broken:
+        print("\n[!] 相对链接指向不存在的文件：")
+        for rel_path, target in broken:
+            print(f"    {rel_path} -> {target}")
+    else:
+        print("[ok] 没有断掉的相对链接")
+
+    print("\n画像填充情况（空 = 未启用，不是错误）：")
+    empty = []
+    for path in profile_files(root):
+        if is_empty(path):
+            print(f"    [--] {path.name}  空")
+            empty.append(path.name)
+        else:
+            print(f"    [ok] {path.name}  已填写")
+    if not profile_files(root):
+        print("    （profile/ 下还没有数据文件）")
+
+    boundaries = root / "profile" / "boundaries.md"
+    if boundaries.exists():
+        text = strip_comments(boundaries.read_text(encoding="utf-8", errors="replace"))
+        hard_count = len(re.findall(r"^###\s*\[硬\]", text, re.M))
+        if hard_count > 3:
+            print(
+                f"\n[!] 硬边界有 {hard_count} 条，常驻层最多放 3 条。"
+                "只挑最关键的 3 条进 resident-layer.md，其余留在这里。"
+            )
+        elif hard_count == 0:
+            print("\n[!] 还没有任何 [硬] 边界。这是整份画像里最值钱的一块，建议至少写一条。")
+
+    # 模块目录与主文件的模块表要对得上，否则「主文件里查不到这个模块」
+    modules = root / "modules"
+    if modules.is_dir():
+        skill_doc = root / "SKILL.md"
+        skill_text = skill_doc.read_text(encoding="utf-8", errors="replace") if skill_doc.exists() else ""
+        unlisted = []
+        for directory in sorted(modules.iterdir()):
+            if not (directory.is_dir() and (directory / "SKILL.md").exists()):
+                continue
+            row = re.compile(r"^\|\s*`?" + re.escape(directory.name) + r"`?\s*\|", re.M)
+            if not row.search(skill_text):
+                unlisted.append(directory.name)
+        if unlisted:
+            print("\n[!] 这些模块没出现在主 SKILL.md 的模块表里：")
+            for name in unlisted:
+                print(f"    {name}")
+            print("    在主文件补一行，否则 Agent 不知道该在什么时候读它。")
+
+    resident = root / "resident-layer.md"
+    if resident.exists():
+        text = strip_comments(resident.read_text(encoding="utf-8", errors="replace"))
+        placeholders = re.findall(r"<[^<>\n]{1,40}>", text)
+        if placeholders:
+            print(f"\n[!] resident-layer.md 还有 {len(placeholders)} 处占位符没填：")
+            for item in placeholders:
+                print(f"    {item}")
+        lines = [line for line in text.splitlines() if line.strip()]
+        if len(lines) > 22:
+            print(f"\n[!] 常驻层有 {len(lines)} 行，建议压到 20 行以内——贴满了没人看。")
+        print(f"\n常驻层版本：{resident_version(root)}　技能版本：{skill_version(root)}")
+        print("    常驻层版本的比对对象是「magpie 指令里粘的那份」，不是技能版本——")
+        print("    Agent 在系统提示里看到旧版本号时，提醒重粘即可。")
+
+    exit_code = 0
+    if args.audit:
+        print()
+        exit_code = audit(root)
+
+    _refresh_index(root, args)
+
+    print()
+    if hard:
+        print("结果：失败。先删掉上面的密钥，再重新跑一次。")
+        print("如果这些值是真的，请立刻吊销并重新签发——它已经进过文件了。")
+        return 1
+    if exit_code:
+        print("结果：有改动绕过了写入脚本。")
+        return 1
+
+    print("结果：通过。")
+    if empty:
+        print(f"有 {len(empty)} 份画像是空的，跳过即可；需要时再补。")
+    return 0
+
+
+def _refresh_index(root: Path, args) -> None:
+    if args.no_index:
+        return
+    try:
+        target = build_index(root)
+        print(f"[ok] 索引已刷新：{rel(root, target)}")
+    except OSError as exc:
+        print(f"[!] 索引刷新失败：{exc}")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

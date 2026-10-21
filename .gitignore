@@ -1,0 +1,5 @@
+# 派生物：本机重建即可，不进仓库
+profile/_index.md
+.profile-state.json
+__pycache__/
+*.pyc
