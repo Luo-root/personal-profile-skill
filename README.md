@@ -218,6 +218,7 @@ MIT。拿去改、拿去用，保留版权声明即可。
 | `modules/` | 可选能力包，默认不用装 | 是 |
 | `assets/logo.svg` | 项目图标 | 是 |
 | `LICENSE` | MIT | 是 |
+| `CONTRIBUTING.md` | 贡献指南（改动流程、哪些文件不能提交） | 是 |
 | `scripts/profile_write.py` | 唯一写入通道 | 是 |
 | `scripts/validate.py` | 自检 + 基线比对 + 刷新索引 | 是 |
 | `scripts/profile_lib.py` | 文件发现、空判定、索引生成、模板初始化、数据根解析（共用） | 是 |
