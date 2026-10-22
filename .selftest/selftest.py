@@ -230,6 +230,36 @@ def check_template_mode() -> None:
     shutil.rmtree(data, ignore_errors=True)
 
 
+def check_doc_contract() -> None:
+    """文档契约：这几条是踩过坑才写出来的，改文档时别把它们改回去。
+
+    背景：真实用过一轮之后发现——
+      · 阶段标题写「选做」，模型就直接跳过后三个阶段，画像只填了最基础的部分；
+      · 文档写「Agent 不要把常驻层当画像读」，模型理解成「别展示给用户」，
+        于是采集完什么都没给，用户拿不到可复制的常驻层；
+      · 按宿主分类列出常驻层位置，既啰嗦又容易让模型挑错。
+    所以这三条直接断言在文件里。
+    """
+    print(f"\n{'=' * 60}\n文档契约\n{'=' * 60}")
+
+    onboarding = (REPO / "onboarding.md").read_text(encoding="utf-8")
+    skill_doc = (REPO / "SKILL.md").read_text(encoding="utf-8")
+
+    check("[doc] onboarding 没有「选做」这种措辞", "选做" not in onboarding,
+          "「选做」等于给模型不问的许可")
+    for stage in ("阶段 1", "阶段 2", "阶段 3", "阶段 4"):
+        check(f"[doc] onboarding 保留了 {stage}", stage in onboarding)
+    check("[doc] onboarding 写明四个阶段一次跑完", "四个阶段一次跑完" in onboarding)
+    check("[doc] onboarding 要求常驻层原样输出", "原样输出在对话里" in onboarding)
+    check("[doc] onboarding 要求占位符填完", "占位符必须填完" in onboarding)
+
+    check("[doc] SKILL.md 写明四个阶段一次跑完", "四个阶段一次跑完" in skill_doc)
+    check("[doc] SKILL.md 要求常驻层正文输出给用户", "原样输出在对话里" in skill_doc)
+    check("[doc] SKILL.md 没有按宿主分类常驻层位置", "常驻层在哪" not in skill_doc)
+    check("[doc] SKILL.md 没有宿主分类表", "| magpie |" not in skill_doc)
+    check("[doc] SKILL.md 提醒占位符要删掉", "占位符必须填完" in skill_doc)
+
+
 def check_repo_hygiene() -> None:
     """仓库层面的检查：模板没被误屏蔽、个人数据确实被挡住。"""
     print(f"\n{'=' * 60}\n仓库卫生\n{'=' * 60}")
@@ -265,6 +295,7 @@ def main() -> int:
     run_suite("single")
     run_suite("split")
     check_template_mode()
+    check_doc_contract()
     check_repo_hygiene()
 
     print()

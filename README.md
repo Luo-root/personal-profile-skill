@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.4.0-4f46e5" alt="version">
+  <img src="https://img.shields.io/badge/version-0.5.0-4f46e5" alt="version">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="license">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555" alt="platform">
   <img src="https://img.shields.io/badge/format-Agent%20Skill-0ea5e9" alt="format">
@@ -83,8 +83,8 @@ none
    - **magpie**：Library → 技能 → 新增 → 来源选**本机文件夹**，指向这个目录。不用另外建仓库。
    - **MiniMax Code**：`git clone` 到 `~/.minimax/skills/personal-profile-skill/`。
    - 别的宿主按各自的 skill 安装方式装，**装好后确认它指向的是这个目录**，不是某份拷贝。
-4. **贴常驻层**：把生成的 `resident-layer.md` 粘进宿主的常驻位——magpie 的「指令」，
-   MiniMax Code 的 `AGENTS.md` 或用户级 Memory。
+4. **贴常驻层**：采集结束时，Agent 会把 `resident-layer.md` 的正文**原样贴在对话里**给你。
+   把它粘到你平时放常驻指令的那个位置即可——各个工具叫法不一样，让它把文本给你、你自己放。
 
 第 3、4 步的菜单名以你当前那个宿主的版本为准。
 
@@ -152,10 +152,10 @@ python scripts/validate.py --audit      # 以后查有没有绕过去改
 ## 版本与漂移
 
 - `SKILL.md` 的 `version:` 是技能版本
-- `resident-layer.md` 末尾有一行 `常驻层 vN`，那是**你粘进 magpie 的那份**的版本
-- 改了边界就要同步改 `resident-layer.md` 并把 `vN` 加一，然后重新粘贴
+- `resident-layer.md` 末尾有一行 `常驻层 vN`，那是**你粘出去的那份**的版本
+- 改了边界就要同步改 `resident-layer.md` 并把 `vN` 加一，然后重新粘一次
 
-Agent 如果发现系统提示里的版本比文件里的旧，会提醒你重粘。这是唯一能发现「magpie 里粘的是旧版」的办法。
+Agent 如果发现系统提示里的版本比文件里的旧，会提醒你重粘。这是唯一能发现「你那边粘的是旧版」的办法。
 
 ## 校验
 
