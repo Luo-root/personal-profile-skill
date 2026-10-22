@@ -16,6 +16,11 @@
   <img src="https://img.shields.io/badge/format-Agent%20Skill-0ea5e9" alt="format">
 </p>
 
+<p align="center">
+  <a href="https://github.com/Luo-root/personal-profile-skill/stargazers"><img src="https://img.shields.io/github/stars/Luo-root/personal-profile-skill?style=social" alt="Stars"></a>
+  <a href="https://github.com/Luo-root/personal-profile-skill/graphs/contributors"><img src="https://img.shields.io/github/contributors/Luo-root/personal-profile-skill?style=social" alt="Contributors"></a>
+</p>
+
 ## 它解决什么
 
 Agent 的能力可以迁移——网关配置、MCP、技能都能同步。但**你这个人**带不走。新装一个 Agent，它不知道该怎么称呼你、喜欢多长的回答、哪些事必须先问你、你的仓库和服务器在哪。
@@ -224,3 +229,13 @@ MIT。拿去改、拿去用，保留版权声明即可。
 | `resident-layer.md` | **你的**常驻层（生成物，带版本号） | 否 |
 | `inbox.md` | **你的**待合并 / 已拒绝 | 否 |
 | `.profile-state.json` | 哈希基线（脚本自动维护） | 否 |
+
+## ⭐ 支持 personal-profile-skill
+
+让 Agent 一次读懂你：可随 magpie 迁移的个人画像 skill 模板。
+
+如果你也遇到过「换 Agent 就要重新解释一遍自己」，Star 一下能帮它被更多人看到 —— 对个人维护的开源项目帮助很大。
+
+- 遇到问题或想要功能：[提交 issue](https://github.com/Luo-root/personal-profile-skill/issues)
+- 觉得好用但暂时没需求：点右上角的 ⭐ 就够了
+- 想参与开发：[贡献指南](CONTRIBUTING.md)
